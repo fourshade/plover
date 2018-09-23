@@ -1,4 +1,4 @@
-
+import collections
 from io import open
 import os
 import re
@@ -23,7 +23,7 @@ def _load_wordlist(filename):
     return words
 
 def _key_order(keys, numbers):
-    key_order = {}
+    key_order = collections.defaultdict(lambda: -1)
     for order, key in enumerate(keys):
         key_order[key] = order
         number_key = numbers.get(key)

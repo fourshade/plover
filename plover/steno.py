@@ -44,7 +44,7 @@ def normalize_steno(strokes_string):
                  in strokes_string.split(STROKE_DELIMITER))
 
 def sort_steno_keys(steno_keys):
-    return sorted(steno_keys, key=lambda x: system.KEY_ORDER.get(x, -1))
+    return sorted(steno_keys, key=system.KEY_ORDER.__getitem__)
 
 def sort_steno_strokes(strokes_list):
     '''Return suggestions, sorted by fewest strokes, then fewest keys.'''
