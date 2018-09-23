@@ -51,8 +51,9 @@ def sort_steno_strokes(strokes_list):
     return sorted(strokes_list, key=lambda x: (len(x), sum(map(len, x))))
 
 
-class Stroke:
-    """A standardized data model for stenotype machine strokes.
+class Stroke(set):
+    """
+    A standardized data model for stenotype machine strokes.
 
     This class standardizes the representation of a stenotype chord. A stenotype
     chord can be any sequence of stenotype keys that can be simultaneously
@@ -62,41 +63,41 @@ class Stroke:
     stenographic ordering on the keys, and combines the keys into a single
     string (called RTFCRE for historical reasons).
 
+    The class itself is a set of steno keys, with the following attributes:
+    steno_keys:    A sorted list of the contained keys.
+    rtfcre:        String representation of the sorted keys.
+    is_correction: True if the stroke consists solely of the undo key.
     """
 
-    def __init__(self, steno_keys) :
-        """Create a steno stroke by formatting steno keys.
+    def __init__(self, steno_keys):
+        """ Create a steno stroke by formatting steno keys.
 
         Arguments:
 
-        steno_keys -- A sequence of pressed keys.
+        steno_keys -- A container of pressed keys.
 
         """
-        # Remove duplicate keys and save local versions of the input 
-        # parameters.
-        steno_keys_set = set(steno_keys)
-        # Order the steno keys so comparisons can be made.
-        steno_keys = list(sort_steno_keys(steno_keys_set))
+        # Remove duplicate keys and save the rest in the set.
+        super().__init__(steno_keys)
 
         # Convert strokes involving the number bar to numbers.
-        if system.NUMBER_KEY in steno_keys:
-            numeral = False
-            for i, e in enumerate(steno_keys):
-                if e in system.NUMBERS:
-                    steno_keys[i] = system.NUMBERS[e]
-                    numeral = True
-            if numeral:
-                steno_keys.remove(system.NUMBER_KEY)
-        
-        if steno_keys_set & system.IMPLICIT_HYPHEN_KEYS:
-            self.rtfcre = ''.join(key.strip('-') for key in steno_keys)
-        else:
-            pre = ''.join(k.strip('-') for k in steno_keys if k[-1] == '-' or 
-                          k == system.NUMBER_KEY)
-            post = ''.join(k.strip('-') for k in steno_keys if k[0] == '-')
-            self.rtfcre = '-'.join([pre, post]) if post else pre
+        if system.NUMBER_KEY in self:
+            numerals = self.intersection(system.NUMBERS)
+            if numerals:
+                self.remove(system.NUMBER_KEY)
+                for k in numerals:
+                    self.remove(k)
+                    self.add(system.NUMBERS[k])
 
-        self.steno_keys = steno_keys
+        # Sort the keys into a list and build an RTFCRE string out of them.
+        self.steno_keys = sort_steno_keys(self)
+        if self & system.IMPLICIT_HYPHEN_KEYS:
+            self.rtfcre = ''.join(key.strip('-') for key in self.steno_keys)
+        else:
+            pre = ''.join(k.strip('-') for k in self.steno_keys if k[-1] == '-'
+                          or k == system.NUMBER_KEY)
+            post = ''.join(k.strip('-') for k in self.steno_keys if k[0] == '-')
+            self.rtfcre = '-'.join([pre, post]) if post else pre
 
         # Determine if this stroke is a correction stroke.
         self.is_correction = (self.rtfcre == system.UNDO_STROKE_STENO)
@@ -108,13 +109,5 @@ class Stroke:
             prefix = ''
         return '%sStroke(%s : %s)' % (prefix, self.rtfcre, self.steno_keys)
 
-    def __eq__(self, other):
-        return (isinstance(other, Stroke)
-                and self.steno_keys == other.steno_keys)
-
-    def __ne__(self, other):
-        return not self.__eq__(other)
-
     def __repr__(self):
         return str(self)
-
