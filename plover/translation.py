@@ -78,16 +78,17 @@ def _mapping_to_macro(mapping, stroke):
     return Macro(macro, stroke, cmdline) if macro else None
 
 
-class Translation:
+class Translation(list):
     """A data model for the mapping between a sequence of Strokes and a string.
 
     This class represents the mapping between a sequence of Stroke objects and
     a text string, typically a word or phrase. This class is used as the output
-    from translation and the input to formatting. The class contains the 
-    following attributes:
+    from translation and the input to formatting. Internally it is subclassed
+    from list for quick len() access. It contains the following attributes:
 
-    strokes -- A sequence of Stroke objects from which the translation is
-    derived.
+    strokes -- A list of Stroke objects from which the translation is
+    derived. In this implementation, it refers to the object itself, which
+    means equality is implicitly defined as being equal sequences of strokes.
 
     rtfcre -- A tuple of RTFCRE strings representing the stroke list. This is
     used as the key in the translation mapping.
@@ -113,18 +114,13 @@ class Translation:
         translation -- A translation for the outline or None.
 
         """
-        self.strokes = outline
+        super().__init__(outline)
+        self.strokes = self
         self.rtfcre = tuple(s.rtfcre for s in outline)
         self.english = translation
         self.replaced = []
         self.formatting = []
         self.is_retrospective_command = False
-
-    def __eq__(self, other):
-        return self.rtfcre == other.rtfcre and self.english == other.english
-
-    def __ne__(self, other):
-        return not self.__eq__(other)
 
     def __str__(self):
         if self.english is None:
@@ -136,11 +132,6 @@ class Translation:
 
     def __repr__(self):
         return str(self)
-
-    def __len__(self):
-        if self.strokes is not None:
-            return len(self.strokes)
-        return 0
 
     def has_undo(self):
         # If there is no formatting then we're not dealing with a formatter
