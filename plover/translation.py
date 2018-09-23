@@ -350,26 +350,60 @@ class Translator:
                 return t
 
     def lookup(self, strokes, suffixes=()):
-        dict_key = tuple(s.rtfcre for s in strokes)
-        result = self._dictionary.lookup(dict_key)
+        """ Public lookup method for a sequence of Stroke objects, with optional suffixes to account for. """
+        rtfcre_list = [s.rtfcre for s in strokes]
+        result = self._dictionary.lookup(tuple(rtfcre_list))
         if result is not None:
             return result
-        for key in suffixes:
-            if key in strokes[-1].steno_keys:
-                dict_key = (Stroke([key]).rtfcre,)
-                suffix_mapping = self._dictionary.lookup(dict_key)
-                if suffix_mapping is None:
-                    continue
-                keys = strokes[-1].steno_keys[:]
+        if suffixes:
+            return self._lookup_affixes(rtfcre_list,
+                                        self._test_and_remove_each(strokes[-1].steno_keys, suffixes))
+
+    def _lookup_affixes(self, rtfcre_seq, test_pairs, prefix=False):
+        """
+        Look up variations on a stroke sequence due to prefixes and/or suffixes.
+        rtfcre_seq is a stroke sequence in RTFCRE form. The stroke under test will not be used.
+        test_pairs are containers of (key, removed) pairs representing stroke variations:
+            key - Affix in key form that is contained within the final stroke.
+            removed - RTFCRE representation of the final stroke with that affix key removed.
+            prefix - If True, test for prefixes instead of suffixes.
+        """
+        # Test variations of the last stroke for suffixes, or the first for prefixes.
+        test_index = 0 if prefix else -1
+        test_seq = rtfcre_seq[:]
+        lookup = self._dictionary.lookup
+        for key, removed in test_pairs:
+            # Removing the key from the test stroke must produce a valid dictionary entry.
+            test_seq[test_index] = removed
+            dict_key = tuple(test_seq)
+            main_mapping = lookup(dict_key)
+            if main_mapping is None:
+                continue
+            # The key itself must also produce a valid dictionary entry
+            dict_key = (Stroke([key]).rtfcre,)
+            affix_mapping = lookup(dict_key)
+            if affix_mapping is None:
+                continue
+            # Add the prefix or suffix where it belongs in relation to the main translation.
+            # The formatter will look for the space and apply any necessary orthography rules.
+            if prefix:
+                return affix_mapping + ' ' + main_mapping
+            else:
+                return main_mapping + ' ' + affix_mapping
+
+    @staticmethod
+    def _test_and_remove_each(stroke_keys, test_keys):
+        """ Given a set of steno keys representing a stroke and a set of test keys each usable
+            as a prefix/suffix, return a list of tuples containing each test key present in
+            the stroke paired with the RTFCRE representation of that stroke after removing the
+            given key from it. """
+        test_pairs = []
+        for key in test_keys:
+            if key in stroke_keys:
+                keys = stroke_keys[:]
                 keys.remove(key)
-                copy = strokes[:]
-                copy[-1] = Stroke(keys)
-                dict_key = tuple(s.rtfcre for s in copy)
-                main_mapping = self._dictionary.lookup(dict_key)
-                if main_mapping is None:
-                    continue
-                return main_mapping + ' ' + suffix_mapping
-        return None
+                test_pairs.append((key, Stroke(keys).rtfcre))
+        return test_pairs
 
 
 class _State:
