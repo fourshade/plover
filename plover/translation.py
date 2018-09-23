@@ -343,7 +343,7 @@ class Translator:
             if mode is suffixes:
                 # To find translations with folded suffixes, the new stroke must be modified separately.
                 # If the stroke has no suffix variations to try, we might as well skip the lookups.
-                last_stroke_mods = self._test_and_remove_each(stroke.steno_keys, suffixes)
+                last_stroke_mods = self._test_and_remove_each(stroke, suffixes)
                 if not last_stroke_mods:
                     continue
             # The new stroke can either create a new translation or replace existing translations
@@ -359,7 +359,7 @@ class Translator:
                     # Finding folded prefixes requires modifications to the first stroke, but
                     # the first stroke changes every time we remove a translation.
                     test_stroke = translations[i].strokes[0] if i < translation_count else stroke
-                    first_stroke_mods = self._test_and_remove_each(test_stroke.steno_keys, prefixes)
+                    first_stroke_mods = self._test_and_remove_each(test_stroke, prefixes)
                     if first_stroke_mods:
                         mapping = self._lookup_affixes(test_seq, first_stroke_mods, prefix=True)
                     else:
@@ -383,7 +383,7 @@ class Translator:
             return result
         if suffixes:
             return self._lookup_affixes(rtfcre_list,
-                                        self._test_and_remove_each(strokes[-1].steno_keys, suffixes))
+                                        self._test_and_remove_each(strokes[-1], suffixes))
 
     def _lookup_affixes(self, rtfcre_seq, test_pairs, prefix=False):
         """
@@ -418,15 +418,15 @@ class Translator:
                 return main_mapping + ' ' + affix_mapping
 
     @staticmethod
-    def _test_and_remove_each(stroke_keys, test_keys):
+    def _test_and_remove_each(stroke, test_keys):
         """ Given a set of steno keys representing a stroke and a set of test keys each usable
             as a prefix/suffix, return a list of tuples containing each test key present in
             the stroke paired with the RTFCRE representation of that stroke after removing the
             given key from it. """
         test_pairs = []
         for key in test_keys:
-            if key in stroke_keys:
-                keys = stroke_keys[:]
+            if key in stroke:
+                keys = set(stroke)
                 keys.remove(key)
                 test_pairs.append((key, Stroke(keys).rtfcre))
         return test_pairs
