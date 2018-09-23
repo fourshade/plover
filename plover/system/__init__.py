@@ -2,7 +2,6 @@
 from io import open
 import os
 import re
-import collections
 
 from plover.oslayer.config import CONFIG_DIR, ASSETS_DIR
 from plover.registry import registry
@@ -32,16 +31,13 @@ def _key_order(keys, numbers):
             key_order[number_key] = order
     return key_order
 
-def _suffix_keys(keys):
-    assert isinstance(keys, collections.Sequence)
-    return keys
-
 _EXPORTS = {
     'KEYS'                     : lambda mod: mod.KEYS,
     'KEY_ORDER'                : lambda mod: _key_order(mod.KEYS, mod.NUMBERS),
     'NUMBER_KEY'               : lambda mod: mod.NUMBER_KEY,
     'NUMBERS'                  : lambda mod: dict(mod.NUMBERS),
-    'SUFFIX_KEYS'              : lambda mod: _suffix_keys(mod.SUFFIX_KEYS),
+    'PREFIX_KEYS'              : lambda mod: tuple(getattr(mod, 'PREFIX_KEYS', ())),
+    'SUFFIX_KEYS'              : lambda mod: tuple(getattr(mod, 'SUFFIX_KEYS', ())),
     'UNDO_STROKE_STENO'        : lambda mod: mod.UNDO_STROKE_STENO,
     'IMPLICIT_HYPHEN_KEYS'     : lambda mod: set(mod.IMPLICIT_HYPHEN_KEYS),
     'IMPLICIT_HYPHENS'         : lambda mod: {l.replace('-', '')
