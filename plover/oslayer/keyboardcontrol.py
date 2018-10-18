@@ -40,7 +40,7 @@ class KeyboardCapture(keyboardcontrol.KeyboardCapture):
 
       `  1  2  3  4  5  6  7  8  9  0  -  =  \\ BackSpace  Insert Home Page_Up
      Tab  q  w  e  r  t  y  u  i  o  p  [  ]               Delete End  Page_Down
-           a  s  d  f  g  h  j  k  l  ;  '      Return
+   CapsLk  a  s  d  f  g  h  j  k  l  ;  '      Return
             z  x  c  v  b  n  m  ,  .  /                          Up
                      space                                   Left Down Right
     '''
