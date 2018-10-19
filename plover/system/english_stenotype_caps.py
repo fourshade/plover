@@ -1,6 +1,6 @@
 
 KEYS = (
-    '#',
+    'X-', '#',
     'S-', 'T-', 'K-', 'P-', 'W-', 'H-', 'R-',
     'A-', 'O-',
     '*',
@@ -131,6 +131,8 @@ KEYMAPS = {
         'arpeggiate': 'space',
         # Suppress adjacent keys to prevent miss-strokes.
         'no-op'     : ('z', 'x', 'b', ',', '.', '/', ']', '\\'),
+        # Use Caps Lock as an additional key to toggle commands and such.
+        'X-'         : 'CapsLk'
     },
     'Passport': {
         '#'    : '#',
