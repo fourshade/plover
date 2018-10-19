@@ -1,6 +1,7 @@
 # Copyright (c) 2016 Open Steno Project
 # See LICENSE.txt for details.
 
+from operator import eq as op_eq
 import os
 
 from plover.oslayer.config import CONFIG_DIR
@@ -65,6 +66,16 @@ def boolean(value):
             return False
         raise ValueError(value)
     return bool(value)
+
+def common_prefix_length(s1, s2):
+    """ Return the number of characters common to the given strings
+       (or any two sequences) from the start. """
+    i = 0
+    for p in map(op_eq, s1, s2):
+        if not p:
+            break
+        i += 1
+    return i
 
 def to_surrogate_pair(char):
     pairs = []
