@@ -6,46 +6,49 @@
 from plover import system
 
 
-def make_candidates_from_rules(word, suffix, check=lambda x: True):
-    candidates = []
-    for r in system.ORTHOGRAPHY_RULES:
-        m = r[0].match(word + " ^ " + suffix)
-        if m:   
-            expanded = m.expand(r[1])
-            if check(expanded):
-                candidates.append(expanded)
-    return candidates
+def _add_candidates_from_rules(candidates, word, suffix):
+    """ Use regular expressions to match orthography rules. """
+    input = word + " ^ " + suffix
+    for (rx_match, replacement) in system.ORTHOGRAPHY_RULES:
+        m = rx_match(input)
+        if m:
+            candidates.append(m.expand(replacement))
+
 
 def _add_suffix(word, suffix):
-    in_dict_f = lambda x: x in system.ORTHOGRAPHY_WORDS
+    """ Try to find a valid way to join a suffix to a root word using
+        simple concatenation or regular expressions. A dictionary of
+        the most common English words is used for validation. """
 
+    in_dict_f = system.ORTHOGRAPHY_WORDS.__contains__
     candidates = []
-    
-    alias = system.ORTHOGRAPHY_RULES_ALIASES.get(suffix, None)
-    if alias is not None:
-        candidates.extend(make_candidates_from_rules(word, alias, in_dict_f))
-    
+
     # Try a simple join if it is in the dictionary.
     simple = word + suffix
     if in_dict_f(simple):
         candidates.append(simple)
-    
-    # Try rules with dict lookup.
-    candidates.extend(make_candidates_from_rules(word, suffix, in_dict_f))
 
-    # For all candidates sort by prominence in dictionary and, since sort is
-    # stable, also by the order added to candidates list.
+    # Add matches from the regular expression orthography rules.
+    _add_candidates_from_rules(candidates, word, suffix)
+
+    # If the suffix has an alias, try the rules on that too.
+    alias = system.ORTHOGRAPHY_RULES_ALIASES.get(suffix, None)
+    if alias is not None:
+        _add_candidates_from_rules(candidates, word, alias)
+
+    # From all candidates, choose the first by prominence in the dictionary.
+    # In case of a tie, min() keeps the first item added to the candidates list.
+    # If none of the candidates are in the dictionary, just return the first one.
     if candidates:
-        candidates.sort(key=lambda x: system.ORTHOGRAPHY_WORDS[x])
-        return candidates[0]
-    
-    # Try rules without dict lookup.
-    candidates = make_candidates_from_rules(word, suffix)
-    if candidates:
-        return candidates[0]
-    
-    # If all else fails then just do a simple join.
+        dict_candidates = list(filter(in_dict_f, candidates))
+        if dict_candidates:
+            return min(dict_candidates, key=system.ORTHOGRAPHY_WORDS.__getitem__)
+        else:
+            return candidates[0]
+
+    # If none of the rules matched *at all*, just do a simple join.
     return simple
+
 
 def add_suffix(word, suffix):
     """Add a suffix to a word by applying the rules above
