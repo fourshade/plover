@@ -14,11 +14,16 @@ def _load_wordlist(filename):
         path = os.path.realpath(os.path.join(dir, filename))
         if os.path.exists(path):
             break
+    # Split the file on all whitespace, leaving a list of alternating
+    # fields: [word, rank, word, rank,...]. Then make an iterator and
+    # include it twice in a zip so that it gets polled twice each iteration.
+    # This will shift out pairs of (word: rank) to the dict, and since the
+    # rank is a single ASCII digit, getting the ordinal is the cheapest way
+    # to convert to a small numeric type that preserves ordering.
     with open(path, encoding='utf-8') as f:
-        pairs = [word.strip().rsplit(' ', 1) for word in f]
-        pairs.sort(reverse=True, key=lambda x: int(x[1]))
-        words = {p[0]: int(p[1]) for p in pairs}
-    return words
+        fields = f.read().split()
+    i = iter(fields)
+    return dict(zip(i, map(ord, i)))
 
 def _key_order(keys, numbers):
     """ Make an ordinal mapping of steno keys starting from 0.
