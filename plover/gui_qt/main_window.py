@@ -13,7 +13,6 @@ from PyQt5.QtWidgets import (
 )
 
 from plover import log
-from plover.oslayer import wmctrl
 from plover.oslayer.config import CONFIG_DIR
 from plover.registry import registry
 from plover.resource import resource_filename
@@ -154,8 +153,6 @@ class MainWindow(QMainWindow, Ui_MainWindow, WindowState):
                 self.showMinimized()
 
     def _activate_dialog(self, name, args=(), manage_windows=False):
-        if manage_windows:
-            previous_window = wmctrl.GetForegroundWindow()
         dialog = self._active_dialogs.get(name)
         if dialog is None:
             dialog_class = self._dialog_class[name]
@@ -164,8 +161,8 @@ class MainWindow(QMainWindow, Ui_MainWindow, WindowState):
             def on_finished():
                 del self._active_dialogs[name]
                 dialog.deleteLater()
-                if manage_windows and previous_window is not None:
-                    wmctrl.SetForegroundWindow(previous_window)
+                # if manage_windows:
+                #     reset focus to foreground window (not needed)?
             dialog.finished.connect(on_finished)
         dialog.show()
         dialog.activateWindow()
