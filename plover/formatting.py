@@ -6,12 +6,11 @@
 This module defines and implements plover's custom dictionary language.
 
 """
-
-from os.path import commonprefix
 from collections import namedtuple
 import re
 import string
 
+from plover.misc import common_prefix_length
 from plover.orthography import add_suffix
 from plover.registry import registry
 
@@ -28,7 +27,7 @@ META_ATTACH_FLAG = '^'
 META_CAPITALIZE = '-|'
 META_CARRY_CAPITALIZATION = '~|'
 META_COMMAND = 'PLOVER:'
-META_COMMAS = (',', ':', ';')
+META_COMMAS = {',', ':', ';'}
 META_CUSTOM = ':'
 META_GLUE_FLAG = '&'
 META_KEY_COMBINATION = '#'
@@ -38,7 +37,7 @@ META_RETRO_CAPITALIZE = '*-|'
 META_RETRO_FORMAT = '*('
 META_RETRO_LOWER = '*>'
 META_RETRO_UPPER = '*<'
-META_STOPS = ('.', '!', '?')
+META_STOPS = {'.', '!', '?'}
 META_UPPER = '<'
 MODE_CAMEL = 'CAMEL'
 MODE_CAPS = 'CAPS'
@@ -453,23 +452,31 @@ class OutputHelper:
         # 2
         # >>> len(unicodedata.normalize('NFC', u"C\u0327"))
         # 1
-        if len(self.before.replaced_text) > len(self.after.replaced_text):
-            assert self.before.replaced_text.endswith(self.after.replaced_text)
-            replaced_text = self.before.replaced_text
+        before = self.before
+        after = self.after
+        before_replaced_text = before.replaced_text
+        after_replaced_text = after.replaced_text
+        length_difference = len(before_replaced_text) - len(after_replaced_text)
+        if length_difference == 0:
+            new_before = before.appended_text
+            new_after = after.appended_text
+        elif length_difference > 0:
+            assert before_replaced_text.endswith(after_replaced_text)
+            new_before = before.appended_text
+            new_after = before_replaced_text[:length_difference] + after.appended_text
         else:
-            assert self.after.replaced_text.endswith(self.before.replaced_text)
-            replaced_text = self.after.replaced_text
-        before = replaced_text[:len(replaced_text)-len(self.before.replaced_text)] + self.before.appended_text
-        after = replaced_text[:len(replaced_text)-len(self.after.replaced_text)] + self.after.appended_text
-        common_length = len(commonprefix([before, after]))
-        erased = len(before) - common_length
+            assert after_replaced_text.endswith(before_replaced_text)
+            new_before = after_replaced_text[:-length_difference] + before.appended_text
+            new_after = after.appended_text
+        common_length = common_prefix_length(new_before, new_after)
+        erased = len(new_before) - common_length
         if erased:
             self.output.send_backspaces(erased)
-        appended = after[common_length:]
+        appended = new_after[common_length:]
         if appended:
             self.output.send_string(appended)
-        self.before.reset(self.after.trailing_space)
-        self.after.reset(self.after.trailing_space)
+        before.reset(after.trailing_space)
+        after.reset(after.trailing_space)
 
     def render(self, last_action, undo, do):
         # Render undone actions, ignoring non-text actions.
@@ -485,88 +492,71 @@ class OutputHelper:
         self.flush()
 
 
-class _Action:
-    """A hybrid class that stores instructions and resulting state.
+class _Action(dict):
+    """
+    An attribute dictionary subclass that stores instructions and resulting state.
+    The class dict stores the default values; any attributes not initialized upon
+    instance creation will end up being read from there.
 
     A single translation may be formatted into one or more actions. The
     instructions are used to render the current action and the state is used as
     context to render future translations.
 
+    Attributes:
+
+    # State variables {
+    prev_attach -- True if there should be no space between this and the
+                   previous action.
+
+
+    glue -- True if there be no space between this and the next action if
+            the next action also has glue set to True.
+
+    word -- The current root word (sans prefix, and un-cased). This is
+            context for future actions whose behavior depends on it such as
+            suffixes.
+
+    upper_carry -- True if we are uppercasing the current word.
+
+    orthography -- True if orthography rules should be applies when adding
+                  a suffix to this action.
+
+    next_attach -- True if there should be no space between this and the next
+                   action.
+
+    next_case -- Case to apply to next action: capitalize/lower/upper... }
+
+    # Persistent state variables {
+    space_char -- this character will replace spaces after all other
+                  formatting has been applied
+    case -- an integer to determine which case to output after formatting
+    trailing_space -- This the space that would be added when rendering
+                      up to this action with space placement set to
+                      'after output'. }
+
+    # Instruction variables {
+    prev_replace -- Text that should be deleted for this action.
+    text -- The text that should be rendered for this action.
+    combo -- The key combo, in plover's key combo language, that should be
+             executed for this action.
+    command -- The command that should be executed for this action. }
     """
+    # Defaults.   Previous:
+    DEFAULTS = {'prev_attach': False, 'prev_replace': '',
+                # Current:
+                'glue': False, 'word': None, 'orthography': True, 'space_char': ' ',
+                'upper_carry': False, 'case': None, 'text': None, 'trailing_space': '',
+                'combo': None, 'command': None,
+                # Next:
+                'next_attach': False, 'next_case': None}
 
-    def __init__(self,
-                 # Previous.
-                 prev_attach=False, prev_replace='',
-                 # Current.
-                 glue=False, word=None, orthography=True, space_char=' ',
-                 upper_carry=False, case=None, text=None, trailing_space='',
-                 combo=None, command=None,
-                 # Next.
-                 next_attach=False, next_case=None
-                ):
-        """Initialize a new action.
-
-        Arguments:
-
-        prev_attach -- True if there should be no space between this and the
-                       previous action.
-
-        prev_replace -- Text that should be deleted for this action.
-
-        glue -- True if there be no space between this and the next action if
-                the next action also has glue set to True.
-
-        word -- The current root word (sans prefix, and un-cased). This is
-                context for future actions whose behavior depends on it such as
-                suffixes.
-
-        upper_carry -- True if we are uppercasing the current word.
-
-        othography -- True if orthography rules should be applies when adding
-                      a suffix to this action.
-
-        space_char -- this character will replace spaces after all other
-        formatting has been applied
-
-        case -- an integer to determine which case to output after formatting
-
-        text -- The text that should be rendered for this action.
-
-        trailing_space -- This the space that would be added when rendering
-                          up to this action with space placement set to
-                          'after output'.
-
-        combo -- The key combo, in plover's key combo language, that should be
-                 executed for this action.
-
-        command -- The command that should be executed for this action.
-
-        next_attach -- True if there should be no space between this and the next
-                       action.
-
-        next_case -- Case to apply to next action: capitalize/lower/upper...
-
-        """
-        # State variables
-        self.prev_attach = prev_attach
-        self.glue = glue
-        self.word = word
-        self.upper_carry = upper_carry
-        self.orthography = orthography
-        self.next_attach = next_attach
-        self.next_case = next_case
-        # Persistent state variables
-        self.space_char = space_char
-        self.case = case
-        self.trailing_space = trailing_space
-        # Instruction variables
-        self.prev_replace = prev_replace
-        self.text = text
-        self.combo = combo
-        self.command = command
+    def __init__(self, **kwargs):
+        """ Initialize a new action from keyword arguments. """
+        super().__init__(self.DEFAULTS, **kwargs)
+        self.__dict__ = self
 
     def copy_state(self):
-        """Clone this action but only clone the state variables."""
+        """ Clone this action but only clone the state variables. """
         return _Action(
             # Previous.
             prev_attach=self.next_attach,
@@ -588,24 +578,11 @@ class _Action:
             # Next.
         )
 
-    def __eq__(self, other):
-        return self.__dict__ == other.__dict__
-
-    def __ne__(self, other):
-        return not self == other
-
     def __str__(self):
-        kwargs = [
-            '%s=%r' % (k, v)
-            for k, v in self.__dict__.items()
-            if v != self.DEFAULT.__dict__[k]
-        ]
-        return 'Action(%s)' % ', '.join(sorted(kwargs))
+        """ Only print attributes that are different from default. """
+        return 'Action(%s)' % {k: v for k, v in self.items() if v != self.DEFAULTS[k]}
 
-    def __repr__(self):
-        return str(self)
-
-_Action.DEFAULT = _Action()
+    __repr__ = __str__
 
 
 def _translation_to_actions(translation, ctx):
@@ -660,11 +637,12 @@ def _raw_to_actions(stroke, ctx):
     no_dash = stroke.replace('-', '', 1)
     if no_dash.isdigit():
         return _translation_to_actions(no_dash, ctx)
+    last_action = ctx.last_action
     action = _Action(text=stroke, word=stroke,
-                     case=ctx.last_action.case,
-                     prev_attach=ctx.last_action.next_attach,
-                     space_char=ctx.last_action.space_char,
-                     trailing_space=ctx.last_action.space_char)
+                     case=last_action.case,
+                     prev_attach=last_action.next_attach,
+                     space_char=last_action.space_char,
+                     trailing_space=last_action.space_char)
     ctx.translated(action)
     return [action]
 
@@ -774,7 +752,7 @@ def _apply_meta_attach(meta, ctx):
         begin and (not end or _has_word_boundary(meta))
     ):
         new_word = add_suffix(last_word, meta)
-        common_len = len(commonprefix([last_word, new_word]))
+        common_len = common_prefix_length(last_word, new_word)
         replaced = last_word[common_len:]
         action.prev_replace = ctx.last_text(len(replaced))
         assert replaced.lower() == action.prev_replace.lower()

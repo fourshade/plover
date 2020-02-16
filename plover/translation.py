@@ -78,16 +78,17 @@ def _mapping_to_macro(mapping, stroke):
     return Macro(macro, stroke, cmdline) if macro else None
 
 
-class Translation:
+class Translation(list):
     """A data model for the mapping between a sequence of Strokes and a string.
 
     This class represents the mapping between a sequence of Stroke objects and
     a text string, typically a word or phrase. This class is used as the output
-    from translation and the input to formatting. The class contains the 
-    following attributes:
+    from translation and the input to formatting. Internally it is subclassed
+    from list for quick len() access. It contains the following attributes:
 
-    strokes -- A sequence of Stroke objects from which the translation is
-    derived.
+    strokes -- A list of Stroke objects from which the translation is
+    derived. In this implementation, it refers to the object itself, which
+    means equality is implicitly defined as being equal sequences of strokes.
 
     rtfcre -- A tuple of RTFCRE strings representing the stroke list. This is
     used as the key in the translation mapping.
@@ -113,18 +114,13 @@ class Translation:
         translation -- A translation for the outline or None.
 
         """
-        self.strokes = outline
+        super().__init__(outline)
+        self.strokes = self
         self.rtfcre = tuple(s.rtfcre for s in outline)
         self.english = translation
         self.replaced = []
         self.formatting = []
         self.is_retrospective_command = False
-
-    def __eq__(self, other):
-        return self.rtfcre == other.rtfcre and self.english == other.english
-
-    def __ne__(self, other):
-        return not self.__eq__(other)
 
     def __str__(self):
         if self.english is None:
@@ -136,11 +132,6 @@ class Translation:
 
     def __repr__(self):
         return str(self)
-
-    def __len__(self):
-        if self.strokes is not None:
-            return len(self.strokes)
-        return 0
 
     def has_undo(self):
         # If there is no formatting then we're not dealing with a formatter
@@ -302,11 +293,7 @@ class Translator:
         if macro is not None:
             self.translate_macro(macro)
             return
-        t = (
-            self._find_translation_helper(stroke) or
-            self._find_translation_helper(stroke, system.SUFFIX_KEYS) or
-            Translation([stroke], mapping)
-        )
+        t = self._find_translation(stroke, suffixes=system.SUFFIX_KEYS, prefixes=system.PREFIX_KEYS)
         self.translate_translation(t)
 
     def translate_macro(self, macro):
@@ -333,52 +320,116 @@ class Translator:
         self._state.translations.extend(translations)
         self._to_do += len(translations)
 
-    def _find_translation_helper(self, stroke, suffixes=()):
-        # Figure out how much of the translation buffer can be involved in this
-        # stroke and build the stroke list for translation.
+    def _find_translation(self, stroke, normal=True, suffixes=(), prefixes=()):
+        # Figure out how much of the translation buffer can be involved in this stroke and
+        # build the stroke list for translation. The longest key with an entry in the
+        # dictionary provides a limit to how many strokes we need to try lookups on.
         num_strokes = 1
         translation_count = 0
+        stroke_limit = self._dictionary.longest_key
         for t in reversed(self._state.translations):
             num_strokes += len(t)
-            if num_strokes > self._dictionary.longest_key:
+            if num_strokes > stroke_limit:
                 break
             translation_count += 1
         translation_index = len(self._state.translations) - translation_count
         translations = self._state.translations[translation_index:]
-        # The new stroke can either create a new translation or replace
-        # existing translations by matching a longer entry in the
-        # dictionary.
-        for i in range(len(translations)+1):
-            replaced = translations[i:]
-            strokes = [s for t in replaced for s in t.strokes]
-            strokes.append(stroke)
-            mapping = self.lookup(strokes, suffixes)
-            if mapping is not None:
-                t = Translation(strokes, mapping)
-                t.replaced = replaced
-                return t
+        # Dictionary keys are in RTFCRE form, so get a list of all these values ahead of time.
+        rtfcre_list = [s for t in translations for s in t.rtfcre]
+        rtfcre_list.append(stroke.rtfcre)
+        lookup = self._dictionary.lookup
+        # Look for translations in this order: with no modifications; with folded suffixes; with folded prefixes.
+        for mode in filter(None, (normal, suffixes, prefixes)):
+            if mode is suffixes:
+                # To find translations with folded suffixes, the new stroke must be modified separately.
+                # If the stroke has no suffix variations to try, we might as well skip the lookups.
+                last_stroke_mods = self._test_and_remove_each(stroke, suffixes)
+                if not last_stroke_mods:
+                    continue
+            # The new stroke can either create a new translation or replace existing translations
+            # by matching a longer entry in the dictionary. Start with the longest possibility,
+            # removing strokes from the left until we find a match or run out of strokes.
+            test_seq = rtfcre_list[:]
+            for i in range(translation_count+1):
+                if mode is normal:
+                    mapping = lookup(tuple(test_seq))
+                elif mode is suffixes:
+                    mapping = self._lookup_affixes(test_seq, last_stroke_mods)
+                else:
+                    # Finding folded prefixes requires modifications to the first stroke, but
+                    # the first stroke changes every time we remove a translation.
+                    test_stroke = translations[i].strokes[0] if i < translation_count else stroke
+                    first_stroke_mods = self._test_and_remove_each(test_stroke, prefixes)
+                    if first_stroke_mods:
+                        mapping = self._lookup_affixes(test_seq, first_stroke_mods, prefix=True)
+                    else:
+                        mapping = None
+                if mapping is not None:
+                    replaced = translations[i:]
+                    t = Translation([s for t in replaced for s in t.strokes]+[stroke], mapping)
+                    t.replaced = replaced
+                    return t
+                if i < translation_count:
+                    del test_seq[:len(translations[i])]
+        # If there are no possible translations in the dictionary, just return the new stroke with no mapping.
+        # The formatter will choose how to handle it (i.e. print the raw steno characters).
+        return Translation([stroke], None)
 
     def lookup(self, strokes, suffixes=()):
-        dict_key = tuple(s.rtfcre for s in strokes)
-        result = self._dictionary.lookup(dict_key)
+        """ Public lookup method for a sequence of Stroke objects, with optional suffixes to account for. """
+        rtfcre_list = [s.rtfcre for s in strokes]
+        result = self._dictionary.lookup(tuple(rtfcre_list))
         if result is not None:
             return result
-        for key in suffixes:
-            if key in strokes[-1].steno_keys:
-                dict_key = (Stroke([key]).rtfcre,)
-                suffix_mapping = self._dictionary.lookup(dict_key)
-                if suffix_mapping is None:
-                    continue
-                keys = strokes[-1].steno_keys[:]
+        if suffixes:
+            return self._lookup_affixes(rtfcre_list,
+                                        self._test_and_remove_each(strokes[-1], suffixes))
+
+    def _lookup_affixes(self, rtfcre_seq, test_pairs, prefix=False):
+        """
+        Look up variations on a stroke sequence due to prefixes and/or suffixes.
+        rtfcre_seq is a stroke sequence in RTFCRE form. The stroke under test will not be used.
+        test_pairs are containers of (key, removed) pairs representing stroke variations:
+            key - Affix in key form that is contained within the final stroke.
+            removed - RTFCRE representation of the final stroke with that affix key removed.
+            prefix - If True, test for prefixes instead of suffixes.
+        """
+        # Test variations of the last stroke for suffixes, or the first for prefixes.
+        test_index = 0 if prefix else -1
+        test_seq = rtfcre_seq[:]
+        lookup = self._dictionary.lookup
+        for key, removed in test_pairs:
+            # Removing the key from the test stroke must produce a valid dictionary entry.
+            test_seq[test_index] = removed
+            dict_key = tuple(test_seq)
+            main_mapping = lookup(dict_key)
+            if main_mapping is None:
+                continue
+            # The key itself must also produce a valid dictionary entry
+            dict_key = (Stroke([key]).rtfcre,)
+            affix_mapping = lookup(dict_key)
+            if affix_mapping is None:
+                continue
+            # Add the prefix or suffix where it belongs in relation to the main translation.
+            # The formatter will look for the space and apply any necessary orthography rules.
+            if prefix:
+                return affix_mapping + ' ' + main_mapping
+            else:
+                return main_mapping + ' ' + affix_mapping
+
+    @staticmethod
+    def _test_and_remove_each(stroke, test_keys):
+        """ Given a set of steno keys representing a stroke and a set of test keys each usable
+            as a prefix/suffix, return a list of tuples containing each test key present in
+            the stroke paired with the RTFCRE representation of that stroke after removing the
+            given key from it. """
+        test_pairs = []
+        for key in test_keys:
+            if key in stroke:
+                keys = set(stroke)
                 keys.remove(key)
-                copy = strokes[:]
-                copy[-1] = Stroke(keys)
-                dict_key = tuple(s.rtfcre for s in copy)
-                main_mapping = self._dictionary.lookup(dict_key)
-                if main_mapping is None:
-                    continue
-                return main_mapping + ' ' + suffix_mapping
-        return None
+                test_pairs.append((key, Stroke(keys).rtfcre))
+        return test_pairs
 
 
 class _State:

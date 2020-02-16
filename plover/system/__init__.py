@@ -1,8 +1,7 @@
-
-from io import open
+import collections
+from itertools import count
 import os
 import re
-import collections
 
 from plover.oslayer.config import CONFIG_DIR, ASSETS_DIR
 from plover.registry import registry
@@ -11,54 +10,53 @@ from plover.registry import registry
 def _load_wordlist(filename):
     if filename is None:
         return {}
-    path = None
     for dir in (CONFIG_DIR, ASSETS_DIR):
         path = os.path.realpath(os.path.join(dir, filename))
         if os.path.exists(path):
             break
-    words = {}
+    # Split the file on all whitespace, leaving a list of alternating
+    # fields: [word, rank, word, rank,...]. Then make an iterator and
+    # include it twice in a zip so that it gets polled twice each iteration.
+    # This will shift out pairs of (word: rank) to the dict, and since the
+    # rank is a single ASCII digit, getting the ordinal is the cheapest way
+    # to convert to a small numeric type that preserves ordering.
     with open(path, encoding='utf-8') as f:
-        pairs = [word.strip().rsplit(' ', 1) for word in f]
-        pairs.sort(reverse=True, key=lambda x: int(x[1]))
-        words = {p[0]: int(p[1]) for p in pairs}
-    return words
+        fields = f.read().split()
+    i = iter(fields)
+    return dict(zip(i, map(ord, i)))
 
 def _key_order(keys, numbers):
-    key_order = {}
-    for order, key in enumerate(keys):
-        key_order[key] = order
-        number_key = numbers.get(key)
-        if number_key is not None:
-            key_order[number_key] = order
-    return key_order
+    """ Make an ordinal mapping of steno keys starting from 0.
+        The order is the same whether or not a key is used as a number. """
+    key_order = dict(zip(keys, count()))
+    for (key, number) in numbers.items():
+        key_order[number] = key_order[key]
+    return collections.defaultdict(lambda: -1, key_order)
 
-def _suffix_keys(keys):
-    assert isinstance(keys, collections.Sequence)
-    return keys
+# System attributes that can be directly copied from the plugin.
+_DIRECT_EXPORTS = ('KEYS', 'NUMBER_KEY', 'NUMBERS', 'UNDO_STROKE_STENO',
+                   'ORTHOGRAPHY_RULES_ALIASES', 'KEYMAPS',
+                   'DICTIONARIES_ROOT', 'DEFAULT_DICTIONARIES')
 
-_EXPORTS = {
-    'KEYS'                     : lambda mod: mod.KEYS,
+# System attributes that must be calculated from the plugin.
+_CALCULATED_EXPORTS = {
     'KEY_ORDER'                : lambda mod: _key_order(mod.KEYS, mod.NUMBERS),
-    'NUMBER_KEY'               : lambda mod: mod.NUMBER_KEY,
-    'NUMBERS'                  : lambda mod: dict(mod.NUMBERS),
-    'SUFFIX_KEYS'              : lambda mod: _suffix_keys(mod.SUFFIX_KEYS),
-    'UNDO_STROKE_STENO'        : lambda mod: mod.UNDO_STROKE_STENO,
+    'PREFIX_KEYS'              : lambda mod: tuple(getattr(mod, 'PREFIX_KEYS', ())),
+    'SUFFIX_KEYS'              : lambda mod: tuple(getattr(mod, 'SUFFIX_KEYS', ())),
     'IMPLICIT_HYPHEN_KEYS'     : lambda mod: set(mod.IMPLICIT_HYPHEN_KEYS),
     'IMPLICIT_HYPHENS'         : lambda mod: {l.replace('-', '')
                                               for l in mod.IMPLICIT_HYPHEN_KEYS},
     'ORTHOGRAPHY_WORDS'        : lambda mod: _load_wordlist(mod.ORTHOGRAPHY_WORDLIST),
-    'ORTHOGRAPHY_RULES'        : lambda mod: [(re.compile(pattern, re.I), replacement)
+    'ORTHOGRAPHY_RULES'        : lambda mod: [(re.compile(pattern, re.I).match, replacement)
                                               for pattern, replacement in mod.ORTHOGRAPHY_RULES],
-    'ORTHOGRAPHY_RULES_ALIASES': lambda mod: dict(mod.ORTHOGRAPHY_RULES_ALIASES),
-    'KEYMAPS'                  : lambda mod: mod.KEYMAPS,
-    'DICTIONARIES_ROOT'        : lambda mod: mod.DICTIONARIES_ROOT,
-    'DEFAULT_DICTIONARIES'     : lambda mod: mod.DEFAULT_DICTIONARIES,
 }
 
 def setup(system_name):
     system_symbols = {}
     mod = registry.get_plugin('system', system_name).obj
-    for symbol, init in _EXPORTS.items():
+    for symbol in _DIRECT_EXPORTS:
+        system_symbols[symbol] = getattr(mod, symbol)
+    for symbol, init in _CALCULATED_EXPORTS.items():
         system_symbols[symbol] = init(mod)
     system_symbols['NAME'] = system_name
     globals().update(system_symbols)
