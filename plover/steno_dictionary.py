@@ -249,7 +249,7 @@ class StenoDictionaryCollection:
         reverse_lookup = self.reverse_lookup
         results_append = results.append
         for v in sorted(values, key=str.lower):
-            if v is not old_v:
+            if v != old_v:
                 old_v = v
                 keys = reverse_lookup(v)
                 if keys:
